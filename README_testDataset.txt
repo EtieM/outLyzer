@@ -11,4 +11,4 @@ Containing:
 - resultsExample.vcf
 - resultsExample.metrics
 
-An exemple of utilisation is provided in README file and should give the same results as in resultsExample files. 
+An exemple of utilisation is provided in README file and should give the same results as in the resultsExample files. 
