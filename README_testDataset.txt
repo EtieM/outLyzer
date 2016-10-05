@@ -11,4 +11,6 @@ Containing:
 - resultsExample.vcf
 - resultsExample.metrics
 
+NB: test_dataSet.bam file is aligned on hg19 reference genome.
+
 An exemple of utilisation is provided in README file and should give the same results as in the resultsExample files. 
