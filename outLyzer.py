@@ -88,14 +88,14 @@ def cutBedFile(bedFilePath,cutNb,outputPath):
     bedList = os.listdir(outputPath)
     finalBedList = []
     for bedFile in bedList:
-        finalBedList.append('%s%s'%(outputPath,bedFile))
+        finalBedList.append(os.path.join(outputPath,bedFile))
     return finalBedList
 
 
-def createOutLyzerCommandList(output,pythonPath,samtoolsPath,progPath,cut,bedList,bamFile,refFile,studentValue,balance,Qscore,SDQ,WinSize,AS,HSM,multiplicativeFactor,verbose,FRcor,WSmin):
+def createOutLyzerCommandList(output,pythonPath,samtoolsPath,progPath,cut,bedList,bamFile,refFile,studentValue,balance,Qscore,SDQ,WinSize,AS,HSM,multiplicativeFactor,verbose,FRcor,WSmin,force):
     outLyzerCommandList = []
     for bedFile in bedList:
-        commandLine = '%s %s subprocess -samtools %s -bam %s -cut %i -output %s -ref %s -bed %s -t %f -bal %f -Q %i -SDQ %i -WS %i -x %f -verbose %i -WSmin %i'%(pythonPath,progPath,samtoolsPath,bamFile,cut,output,refFile,bedFile,studentValue,balance,Qscore,SDQ,WinSize,multiplicativeFactor,verbose,WSmin)
+        commandLine = '%s %s subprocess -samtools %s -bam %s -cut %i -output %s -ref %s -bed %s -t %f -bal %f -Q %i -SDQ %i -WS %i -x %f -verbose %i -WSmin %i -force %f'%(pythonPath,progPath,samtoolsPath,bamFile,cut,output,refFile,bedFile,studentValue,balance,Qscore,SDQ,WinSize,multiplicativeFactor,verbose,WSmin,force)
         if AS:
             commandLine = commandLine+' -AS'
         if HSM:
@@ -107,7 +107,7 @@ def createOutLyzerCommandList(output,pythonPath,samtoolsPath,progPath,cut,bedLis
 
 
 def launchPileupCommandForBedFile(bamFile,samtoolsPath,referenceFile,bedFile,output):
-    samtoolsOutput = subprocess.check_output('%s mpileup -d 100000 -Q 0 -A -R -B -f %s -x -l %s %s 2>> %ssamtoolsError.txt'%(samtoolsPath,referenceFile,bedFile,bamFile,output),shell=True)
+    samtoolsOutput = subprocess.check_output('%s mpileup -d 100000 -Q 0 -A -R -B -f %s -x -l %s %s 2>> %ssamtoolsError.txt'%(samtoolsPath,referenceFile,bedFile,bamFile,output),shell=True).decode('utf-8')
     pileupList = samtoolsOutput.split('\n')
     pileupList.pop()
     return pileupList
@@ -117,12 +117,12 @@ def launchPileupCommandForPosition(bamFile,samtoolsPath,referenceFile,genomicPos
     name = name.split('/')[-1]
     chromosome = genomicPosition.split(':')[0]
     positiontoTest = int(genomicPosition.split(':')[-1])
-    samtoolsPosition = subprocess.check_output('%s mpileup -d 10000 -Q 0 -A -R -B -f %s -x -r %s:%i-%i %s'%(samtoolsPath,referenceFile,chromosome,positiontoTest,positiontoTest,bamFile),shell=True)
+    samtoolsPosition = subprocess.check_output('%s mpileup -d 10000 -Q 0 -A -R -B -f %s -x -r %s:%i-%i %s 2>/dev/null'%(samtoolsPath,referenceFile,chromosome,positiontoTest,positiontoTest,bamFile),shell=True).decode('utf-8')
     if samtoolsPosition == '':
-        print 'No reads mapped on position'
+        print('No reads mapped on position')
     else:
         genomicInterval = '%s:%i-%i'%(chromosome,round(positiontoTest-(windowSize/2)),round(positiontoTest+(windowSize/2)))
-        samtoolsOutput = subprocess.check_output('%s mpileup -d 10000 -Q 0 -A -R -B -f %s -x -r %s %s'%(samtoolsPath,referenceFile,genomicInterval,bamFile),shell=True)
+        samtoolsOutput = subprocess.check_output('%s mpileup -d 10000 -Q 0 -A -R -B -f %s -x -r %s %s 2>/dev/null'%(samtoolsPath,referenceFile,genomicInterval,bamFile),shell=True).decode('utf-8')
         pileupList = samtoolsOutput.split('\n')
         pileupList.pop()
         return pileupList
@@ -164,16 +164,23 @@ def reject_outliersReads(altReadList,studentValue):
     return newAltReadList
         
 
-def calcConfidenceIntervalFromReads(altReadList,studentValue,DP):
-    if altReadList.count('0')> 0.90*len(altReadList):
-        maxOutliers = math.ceil(DP*0.025)
+def calcConfidenceIntervalFromReads(altReadList,studentValue,DP,force):
+    altReadsOutliers = reject_outliersReads(altReadList,studentValue)
+    forced = ''
+    if not len(altReadsOutliers) == 0:
+        maxOutliers = max(altReadsOutliers)
+        if force > 0 and maxOutliers > math.ceil(force*DP):
+            forced = '*'
+            while maxOutliers != 'NA' and maxOutliers > math.ceil(force*DP):
+                altReadsOutliers.pop()
+                altReadsOutliers = reject_outliersReads(altReadsOutliers,studentValue)
+                if len(altReadsOutliers) != 0:
+                    maxOutliers = max(altReadsOutliers)
+                else:
+                    maxOutliers = 'NA'
     else:
-        altReadsOutliers = reject_outliersReads(altReadList,studentValue)
-        if not len(altReadsOutliers) == 0:
-            maxOutliers = max(altReadsOutliers)
-        else:
-            maxOutliers = 0
-    return maxOutliers
+        maxOutliers = 'NA'
+    return maxOutliers,forced
 
 def forwardReverseOrigin(Indel):
     if str.isupper(Indel):
@@ -198,7 +205,7 @@ def countDelInPileup(baseCount):
         indelReal = indelSearch.group(0)[0:int(indelSearch.group(1))+len(indelSearch.group(1))+1]
         indelContent = indelSearch.group(2)[0:int(indelSearch.group(1))]
         orientation = forwardReverseOrigin(indelContent)
-        if not delDic.has_key(indelReal.upper()):
+        if not indelReal.upper() in delDic.keys():
             delDic[indelReal.upper()] = {'Forward':0,'Reverse':0}
             delDic[indelReal.upper()][orientation] = baseCount.count(indelReal)
         else:
@@ -217,7 +224,7 @@ def countInsInPileup(baseCount):
         insReal = insSearch.group(0)[0:int(insSearch.group(1))+len(insSearch.group(1))+1]
         insContent = insSearch.group(2)[0:int(insSearch.group(1))]
         orientation = forwardReverseOrigin(insContent)
-        if not delDic.has_key(insReal.upper()):
+        if not insReal.upper() in delDic.keys():
             delDic[insReal.upper()] = {'Forward':0,'Reverse':0}
             delDic[insReal.upper()][orientation] = baseCount.count(insReal)
         else:
@@ -278,7 +285,7 @@ def defineMainPointMutation(pileupLine, pileupInfosDic):
                 phredQual = 'NA'
                 phredQualStd = 'NA'
             else:
-                phredQual = round(float(sum(qualDic[base]))/(baseCountDic[base.lower()]+baseCountDic[base]),2)-33
+                phredQual = '%.2f'%(float(sum(qualDic[base]))/(baseCountDic[base.lower()]+baseCountDic[base])-33)
                 phredQualStd = round(np.std(qualDic[base]),2)
             altFreqBase = round(((baseCountDic[base]+baseCountDic[base.lower()])/float(pileupInfosDic['depth']))*100,3)
             if altFreqBase > finalAltBaseFreq:
@@ -410,7 +417,7 @@ def getsubs(loc, s):
 
 def testMotifRec(seq):
     check=False
-    for i in xrange(2,int(len(seq)/2),1):
+    for i in range(2,int(len(seq)/2),1):
         first = seq[0:i]
         second = seq[i:2*i]
         if first == second:
@@ -461,9 +468,9 @@ def findMotif(seq,minStretch,mutPos):
 def defineMotifStatus(seq,mutPos):
     motifStatus = ''
     motifDic = findMotif(seq, 5, mutPos)
-    if motifDic.has_key('stretch'):
+    if 'stretch' in motifDic.keys():
         motifStatus += 'S%id%i'%(len(motifDic['stretch'][0]),motifDic['stretch'][1])
-    if motifDic.has_key('motif'):
+    if 'motif' in motifDic.keys():
         if len(motifStatus)!=0:
             motifStatus += '|'
         motifStatus += 'M%id%i'%(len(motifDic['motif'][0]),motifDic['motif'][1])
@@ -509,10 +516,13 @@ def likelihoodMutationState(mutationStats,balance,quality,SDquality,FRcor):
         likelihoodStatus=0
     return likelihoodStatus
 
-def calcExonBackGroundNoise(altReadList,depthList,studentValue):
+def calcExonBackGroundNoise(altReadList,depthList,studentValue,force):
     meanDepth = sum(depthList)/len(depthList)
-    maxOutlier = calcConfidenceIntervalFromReads(altReadList, studentValue,meanDepth)
-    sensitivityLimit = float(maxOutlier)/meanDepth
+    maxOutlier,forced = calcConfidenceIntervalFromReads(altReadList, studentValue,meanDepth,force)
+    if maxOutlier !='NA':
+        sensitivityLimit = float(maxOutlier)/meanDepth
+    else:
+        sensitivityLimit = 'NA'
     return sensitivityLimit
 
 def defineMutationPosInSeq(altReadList,positionInExon,windowSize):
@@ -527,15 +537,15 @@ def defineMutationPosInSeq(altReadList,positionInExon,windowSize):
             mutationPosition = round(windowSize/2)
     return mutationPosition
 
-def detectMutations(exonMatrix,studentValue,balance,quality,SDquality,windowSize,multiplicativeFactor,fileToWrite,FRcor):
+def detectMutations(exonMatrix,studentValue,balance,quality,SDquality,windowSize,multiplicativeFactor,fileToWrite,FRcor,force):
     altReadList = exonMatrix[:,7].tolist()
     refSeqList = exonMatrix[:,3].tolist()
     depthList = [int(i) for i in exonMatrix[:,5].tolist()]
-    exonSensitivityLimit = calcExonBackGroundNoise(altReadList, depthList, studentValue)
+    exonSensitivityLimit = calcExonBackGroundNoise(altReadList, depthList, studentValue,force)
     for rowNum in range(0,len(exonMatrix)):
         windowList = defineWindowToScan(altReadList, int(rowNum), windowSize)
-        maxOutliers = calcConfidenceIntervalFromReads(windowList, studentValue,int(exonMatrix[rowNum,5]))
-        if int(exonMatrix[rowNum,6])>(maxOutliers*multiplicativeFactor):
+        maxOutliers,forced = calcConfidenceIntervalFromReads(windowList, studentValue,int(exonMatrix[rowNum,5]),force)
+        if maxOutliers == 'NA' or int(exonMatrix[rowNum,6])>(maxOutliers*multiplicativeFactor):
             isReal = likelihoodMutationState(exonMatrix[rowNum,:],balance,quality,SDquality,FRcor)
             if isReal:
                 refSeqToScan = ''.join(defineWindowToScan(refSeqList, int(rowNum), 60))
@@ -543,10 +553,10 @@ def detectMutations(exonMatrix,studentValue,balance,quality,SDquality,windowSize
                 motifStatus = defineMotifStatus(refSeqToScan,mutPos)
                 if '+' in exonMatrix[rowNum,4] or '-' in exonMatrix[rowNum,4]:
                     ref,alt = transformIndelAnnotation(exonMatrix[rowNum,3], exonMatrix[rowNum,4])
-                    lineToWrite = '%s\t%s\t.\t%s\t%s\t%s\tPASS\tDP=%s;AF=%s;SDQ=%s;OUTLIER=%s\tBAL:WTbal:MSS\t%s:%s:%s\n'%(exonMatrix[rowNum,1],exonMatrix[rowNum,2],ref,alt,exonMatrix[rowNum,9],exonMatrix[rowNum,5],exonMatrix[rowNum,8],exonMatrix[rowNum,10],maxOutliers,exonMatrix[rowNum,11],exonMatrix[rowNum,12],motifStatus)
+                    lineToWrite = '%s\t%s\t.\t%s\t%s\t%s\tPASS\tDP=%s;AF=%s;SDQ=%s;OUTLIER=%s\tBAL:WTbal:MSS\t%s:%s:%s\n'%(exonMatrix[rowNum,1],exonMatrix[rowNum,2],ref,alt,exonMatrix[rowNum,9],exonMatrix[rowNum,5],exonMatrix[rowNum,8],exonMatrix[rowNum,10],str(maxOutliers)+forced,exonMatrix[rowNum,11],exonMatrix[rowNum,12],motifStatus)
                     fileToWrite.write(lineToWrite)
                 else: 
-                    lineToWrite = '%s\t%s\t.\t%s\t%s\t%s\tPASS\tDP=%s;AF=%s;SDQ=%s;OUTLIER=%s\tBAL:WTbal:MSS\t%s:%s:%s\n'%(exonMatrix[rowNum,1],exonMatrix[rowNum,2],exonMatrix[rowNum,3].upper(),exonMatrix[rowNum,4].upper(),exonMatrix[rowNum,9],exonMatrix[rowNum,5],exonMatrix[rowNum,8],exonMatrix[rowNum,10],maxOutliers,exonMatrix[rowNum,11],exonMatrix[rowNum,12],motifStatus)
+                    lineToWrite = '%s\t%s\t.\t%s\t%s\t%s\tPASS\tDP=%s;AF=%s;SDQ=%s;OUTLIER=%s\tBAL:WTbal:MSS\t%s:%s:%s\n'%(exonMatrix[rowNum,1],exonMatrix[rowNum,2],exonMatrix[rowNum,3].upper(),exonMatrix[rowNum,4].upper(),exonMatrix[rowNum,9],exonMatrix[rowNum,5],exonMatrix[rowNum,8],exonMatrix[rowNum,10],str(maxOutliers)+forced,exonMatrix[rowNum,11],exonMatrix[rowNum,12],motifStatus)
                     fileToWrite.write(lineToWrite)
     return maxOutliers,exonSensitivityLimit
 
@@ -573,7 +583,7 @@ def hotSpotStartPos(hotSpotBed):
     return hotSpotDic
 
 
-def readPileup(pileup,bedNum,studentValue,balance,quality,SDquality,windowSize,vcfPath,multiplicativeFactor,HSMfile,FRcor,WSmin):
+def readPileup(pileup,bedNum,studentValue,balance,quality,SDquality,windowSize,vcfPath,multiplicativeFactor,HSMfile,FRcor,WSmin,force):
     previousPos = ''
     firstLine = 1
     countPosInExon = 0
@@ -592,7 +602,7 @@ def readPileup(pileup,bedNum,studentValue,balance,quality,SDquality,windowSize,v
         mutationStats = extractpileupLineInfos(pileupLine)
         rowToAdd = [countPosInExon,mutationStats['Chromosome'],mutationStats['GenomicPosition'],mutationStats['refBase'],mutationStats['alt'],mutationStats['DP'],mutationStats['altReadsMutation'],int(mutationStats['totalAlt']),mutationStats['AF'],mutationStats['Qual'],mutationStats['Qual_StdDev'],mutationStats['balance'],mutationStats['WT_Bal']]
         if HSMfile != None:
-            if hotSpotDic.has_key('%s_%i'%(Chromosome,genomicPos)):
+            if '%s_%i'%(Chromosome,genomicPos) in hotSpotDic.keys():
                 hotSpotMark['%s_%i'%(Chromosome,genomicPos)] = int(mutationStats['DP'])
         if firstLine == 1:
             exonMatrix = [rowToAdd]
@@ -607,7 +617,7 @@ def readPileup(pileup,bedNum,studentValue,balance,quality,SDquality,windowSize,v
                 if '%s_%i'%(Chromosome,genomicPos) == lastLine:
                     exonMatrix = np.asarray(exonMatrix)
                     if len(exonMatrix)>WSmin:
-                        maxOutlier,exonSensitivityLimit = detectMutations(exonMatrix,studentValue,balance,quality,SDquality,windowSize,multiplicativeFactor,fileToWrite,FRcor)
+                        maxOutlier,exonSensitivityLimit = detectMutations(exonMatrix,studentValue,balance,quality,SDquality,windowSize,multiplicativeFactor,fileToWrite,FRcor,force)
                         exonSensitivity['%s_%s_%s'%(exonMatrix[0,1],exonMatrix[0,2],exonMatrix[-2,2])]=exonSensitivityLimit
                         if HSMfile != None:
                             if not not hotSpotMark:
@@ -619,7 +629,7 @@ def readPileup(pileup,bedNum,studentValue,balance,quality,SDquality,windowSize,v
             else:
                 exonMatrix = np.asarray(exonMatrix)
                 if len(exonMatrix)>WSmin:
-                    maxOutlier,exonSensitivityLimit = detectMutations(exonMatrix,studentValue,balance,quality,SDquality,windowSize,multiplicativeFactor,fileToWrite,FRcor)
+                    maxOutlier,exonSensitivityLimit = detectMutations(exonMatrix,studentValue,balance,quality,SDquality,windowSize,multiplicativeFactor,fileToWrite,FRcor,force)
                     exonSensitivity['%s_%s_%s'%(exonMatrix[0,1],exonMatrix[0,2],exonMatrix[-2,2])]=exonSensitivityLimit
                 else:
                     uncovRegion = '%s_%s_%s'%(exonMatrix[0,1],exonMatrix[0,2],exonMatrix[-1,2])
@@ -632,13 +642,15 @@ def readPileup(pileup,bedNum,studentValue,balance,quality,SDquality,windowSize,v
                 if HSMfile != None:
                     if not not hotSpotMark:
                         for position in hotSpotMark:
-                            metricsFile.write('%s\t%f\n'%(hotSpotDic[position],round(float(maxOutlier)/int(hotSpotMark[position])*100*multiplicativeFactor,2)))  
+                            if maxOutlier !='NA':
+                                metricsFile.write('%s\t%f\n'%(hotSpotDic[position],round(float(maxOutlier)/int(hotSpotMark[position])*100*multiplicativeFactor,2)))  
+                            else:
+                                metricsFile.write('%s\t%f\n'%(hotSpotDic[position],'NA'))  
                         hotSpotMark = {}
-
     fileToWrite.close()
     return exonSensitivity,unCoveredRegions
 
-def readPileupForPosition(pileup,studentValue,balance,quality,SDquality,windowSize,genomicPosition):
+def readPileupForPosition(pileup,studentValue,balance,quality,SDquality,windowSize,genomicPosition,force):
     previousPos = ''
     firstLine = 1
     countPosInExon = 0
@@ -659,15 +671,15 @@ def readPileupForPosition(pileup,studentValue,balance,quality,SDquality,windowSi
                 previousPos = genomicPos
                 countPosInExon += 1
     exonMatrix = np.asarray(exonMatrix)
-    detectMutationsAtPosition(exonMatrix, studentValue, balance, quality, SDquality, windowSize, genomicPosition)
+    detectMutationsAtPosition(exonMatrix, studentValue, balance, quality, SDquality, windowSize, genomicPosition,force)
 
-def detectMutationsAtPosition(exonMatrix,studentValue,balance,quality,SDquality,windowSize,genomicPosition):
+def detectMutationsAtPosition(exonMatrix,studentValue,balance,quality,SDquality,windowSize,genomicPosition,force):
     altReadList = exonMatrix[:,7].tolist()
     refSeqList = exonMatrix[:,3].tolist()
     for rowNum in range(0,len(exonMatrix)):
         positionToFind = '%s:%s'%(exonMatrix[rowNum,1],exonMatrix[rowNum,2])
         if positionToFind == genomicPosition:
-            maxOutliers = calcConfidenceIntervalFromReads(altReadList, studentValue,int(exonMatrix[rowNum,5]))
+            maxOutliers,forced = calcConfidenceIntervalFromReads(altReadList, studentValue,int(exonMatrix[rowNum,5]),force)
             Chr = exonMatrix[rowNum,1]
             genPos = exonMatrix[rowNum,2]
             ref = exonMatrix[rowNum,3]
@@ -717,8 +729,8 @@ def detectMutationsAtPosition(exonMatrix,studentValue,balance,quality,SDquality,
                 else:
                     correctedRper = round(((Alt_R+(Alt_R*diffF))/(Alt_F+Alt_R))*100,1)
                     correctedFper = 100-correctedRper
-            print altReadList
-            print """
+            print(altReadList)
+            print ("""
 Mutation Position:         %s:%s
 Reference Allele:          %s
 Alternative Allele:        %s
@@ -732,9 +744,9 @@ Corrected alt F/R:         %s%% / %s%%
 Raw background Noise:      %s
 Stretch nearby:            %s
 Motif nearby:              %s
-"""%(Chr,genPos,ref,alt,depth,AF,Qual,Qual_StdDev,balance,forwardPer,reversePer,overAllBalance,overAllBalanceR,correctedFper,correctedRper,maxOutliers,stretchInfos,motifInfos)
+"""%(Chr,genPos,ref,alt,depth,AF,Qual,Qual_StdDev,balance,forwardPer,reversePer,overAllBalance,overAllBalanceR,correctedFper,correctedRper,str(maxOutliers)+forced,stretchInfos,motifInfos))
     if len(exonMatrix)-1 != windowSize:
-        print '/!\ Warning: insufficient coverage for some positions on analyzed region.'
+        print('/!\ Warning: insufficient coverage for some positions on analyzed region.')
 
 def writeMetricsFile(sensitivityDic,bamFile,output,bedNum):
     metricsFile = open('%s/tempAS_%i.metrics'%(output,int(bedNum)),'w')
@@ -824,7 +836,7 @@ def writeFinalResults(bamName,output,ASargs,HSMargs,commandLine):
  
 def launchCallingFunction(args):
     if checkInputsCalling(args) == True:
-        print 'starting outLyzer Calling Process'
+        print('starting outLyzer Calling Process')
         startScript = time.time()
         commandLine = ' '.join(sys.argv)
         progPath = sys.argv[0]
@@ -833,33 +845,37 @@ def launchCallingFunction(args):
         if os.path.exists(tempOutLyzerDir):
             os.system('rm -r %s'%(tempOutLyzerDir))
         bedList = cutBedFile(args.bed, args.cut, tempOutLyzerDir)
-        outLyzerCommandList = createOutLyzerCommandList(tempOutLyzerDir, args.pythonPath, args.samtools, progPath, args.cut, bedList, args.bam, args.ref, args.t, args.bal, args.Q, args.SDQ, args.WS, args.AS,args.HSM, args.x,args.verbose,args.FRcor,args.WSmin)
+        outLyzerCommandList = createOutLyzerCommandList(tempOutLyzerDir, args.pythonPath, args.samtools, progPath, args.cut, bedList, args.bam, args.ref, args.t, args.bal, args.Q, args.SDQ, args.WS, args.AS,args.HSM, args.x,args.verbose,args.FRcor,args.WSmin,args.force)
         manageCommandListToLaunch(outLyzerCommandList, args.core)
         if args.verbose == 1:
-            print 'Formatting results for %s'%bamName
+            print('Formatting results for %s'%bamName)
         writeFinalResults(bamName, args.output, args.AS,args.HSM,commandLine)
         endScript = time.time()
-        print 'outLyzer analysis performed in %f sec.'%(endScript-startScript)
+        print('outLyzer analysis performed in %f sec.'%(endScript-startScript))
     
 def launchPositionAnalysisFunction(args):
     if checkInputsPositionAnalysis(args) == True:
-        print 'start analysis on position: ',args.position
+        print('start analysis on position: ',args.position)
         pileup = launchPileupCommandForPosition(args.bam, args.samtools, args.ref, args.position, args.WS)
         if pileup != None:
-            readPileupForPosition(pileup, args.t, args.bal, args.Q, args.SDQ, args.WS, args.position)
+            if not args.force:
+                force = 0
+            else:
+                force = args.force
+            readPileupForPosition(pileup, args.t, args.bal, args.Q, args.SDQ, args.WS, args.position,force)
         else:
-            print 'End of Analysis'
+            print('End of Analysis')
     
 def launchSubProcess(args):
     bamName = args.bam.split('/')[-1]
     bamPart = args.bed.split('/')[-1].split('.')[0].split('_')[-1]
     if args.verbose == 1:
-        print "pileup conversion for %s part %s / %s"%(bamName,bamPart,args.cut)
+        print("pileup conversion for %s part %s / %s"%(bamName,bamPart,args.cut))
     pileup = launchPileupCommandForBedFile(args.bam, args.samtools, args.ref, args.bed,args.output)
     bedNum = args.bed.split('.')[-2].split('_')[-1]
     if args.verbose == 1:
-        print 'statistical analysis for %s part %s / %s'%(bamName,bamPart,args.cut)
-    exonSensitivityLimit,uncoveredRegions = readPileup(pileup, bedNum, args.t, args.bal, args.Q, args.SDQ, args.WS, args.output, args.x, args.HSM,args.FRcor,args.WSmin)
+        print('statistical analysis for %s part %s / %s'%(bamName,bamPart,args.cut))
+    exonSensitivityLimit,uncoveredRegions = readPileup(pileup, bedNum, args.t, args.bal, args.Q, args.SDQ, args.WS, args.output, args.x, args.HSM,args.FRcor,args.WSmin,args.force)
     if args.AS:
         writeMetricsFile(exonSensitivityLimit, args.bam, args.output, bedNum)
     if len(uncoveredRegions)>0:
@@ -873,15 +889,15 @@ def checkInputsCalling(args):
     pathToCheckList = [args.bed,args.bam,args.ref,args.output]
     for pathToCheck in pathToCheckList:
         if os.path.exists(pathToCheck) == False:
-            print "%s doesn't exists"%pathToCheck
+            print("%s doesn't exists"%pathToCheck)
             checkResponse = False
     if not args.output.endswith('/'):
-        print """'/' is missing to the end of %s"""%args.output
+        print("""'/' is missing to the end of %s"""%args.output)
         checkResponse = False
     if args.HSM:
         if os.path.exists('%s'%args.HSM) == False:
-            print os.path.exists('%s'%args.HSM)
-            print "%s doesn't exists"%args.HSM
+            print (os.path.exists('%s'%args.HSM))
+            print("%s doesn't exists"%args.HSM)
             checkResponse = False
     return checkResponse
 
@@ -890,12 +906,12 @@ def checkInputsPositionAnalysis(args):
     pathToCheckList = [args.bam,args.ref]
     for pathToCheck in pathToCheckList:
         if os.path.exists(pathToCheck) == False:
-            print "%s doesn't exists"%pathToCheck
+            print("%s doesn't exists"%pathToCheck)
             checkResponse = False
     return checkResponse
 
 def printLicense(args):
-    print """Copyright Etienne Muller (2016)
+    print("""Copyright Etienne Muller (2016)
 
 muller.etienne@hotmail.fr
 
@@ -927,7 +943,7 @@ data to be ensured and,  more generally, to use and operate it in the
 same conditions as regards security. 
 
 The fact that you are presently reading this means that you have had
-knowledge of the CeCILL license and that you accept its terms."""
+knowledge of the CeCILL license and that you accept its terms.""")
         
 if __name__ == "__main__":
         parser = argparse.ArgumentParser(description="""
@@ -963,6 +979,7 @@ using modified Thompson tau technique.""",formatter_class=RawTextHelpFormatter)
         parser_calling.add_argument('-x',help='Multiplicative factor that specifies how often the mutation must be above background noise [2]',default=2,type=float)
         parser_calling.add_argument('-AS',help='Analysis sensitivity: Returns an additional file containing analysis average sensitivity for each line of bed file',action='store_true')
         parser_calling.add_argument('-FRcor',help='Forward Reverse Correction: take into account any imbalance in the Forward-Reverse reads distribution in the Forward / Reverse alternative Read Proportion (-bal option)',action='store_true')
+        parser_calling.add_argument('-force',help='Force noise background determination to go below a fixed proportion of the Depth [default = disabled; 0 -> 1 ex: "-force 0.2"] ',type = float, default=0)
         parser_calling.add_argument('-HSM',help='HotSpot Metrics: Produce sensitivity Threshold for HotSpot positions, in an additional file. Requires formated HotSpot File in argument (see documentation for more details).')
         parser_calling.add_argument('-verbose',help='If verbose mode is set to 1, details analysis process steps [0]',type = int, default=0)
         parser_calling.set_defaults(func=launchCallingFunction)
@@ -983,6 +1000,7 @@ using modified Thompson tau technique.""",formatter_class=RawTextHelpFormatter)
         parser_subprocess.add_argument('-x',help='Multiplicative factor that specifies how often the mutation must be above background noise [2]',default=2,type=float)
         parser_subprocess.add_argument('-AS',help='Analysis sensitivity: Returns an additional file containing analysis average sensitivity for each line of bed file',action='store_true')
         parser_subprocess.add_argument('-FRcor',help='Forward Reverse Correction: take into account any imbalance in the Forward-Reverse reads distribution in the Forward / Reverse alternative Read Proportion (-bal option)',action='store_true')
+        parser_subprocess.add_argument('-force',help='Force noise background determination to go below a fixed proportion of the Depth [default = disabled ; 0 -> 1 ex: "-force 0.2"] ',type = float,default =0)
         parser_subprocess.add_argument('-HSM',help='HotSpot Metrics: Produce sensitivity Threshold for HotSpot positions, in an additional file. Requires HotSpot File in argument')
         parser_subprocess.add_argument('-output',help='output Path To write results',required=True)
         parser_subprocess.add_argument('-verbose',help='If verbose mode is set to 1, details analysis process steps [0]',type = int, default=0)
@@ -998,12 +1016,10 @@ using modified Thompson tau technique.""",formatter_class=RawTextHelpFormatter)
         parser_posAna.add_argument('-Q',help='minimum average Phred Score to be considered as a real mutation (only relevant for SNP) [20]',default=20,type=int)
         parser_posAna.add_argument('-SDQ',help='maximum Standard deviation authorized for average Phred Score [7]',default=7,type=int)
         parser_posAna.add_argument('-WS',help='Window Size: region (number of bp) around the mutation on which background noise have to be determined [200]',default=200,type=int)
+        parser_posAna.add_argument('-force',help='Force noise background determination to go below a fixed proportion of the Depth [default = disabled] ',type = float,default =0)
         parser_posAna.set_defaults(func=launchPositionAnalysisFunction)
 # LICENSE
         parser_LICENSE = subparsers.add_parser('LICENSE')
         parser_LICENSE.set_defaults(func=printLicense)
         args=parser.parse_args()
         args.func(args)
-
-
-        

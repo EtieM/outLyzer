@@ -1,6 +1,6 @@
 Copyright Etienne Muller (2016)
 
-biomol.cfb@gmail.com
+muller.etienne@hotmail.fr
 
 outLyzer is a computer program whose purpose is to detect variations,
 specifically low allele frequency variation, in next generation 
@@ -36,10 +36,10 @@ same conditions as regards security.
 The fact that you are presently reading this means that you have had
 knowledge of the CeCILL license and that you accept its terms.
 
-outLyzer version 2.0 31/05/2018
+outLyzer version 3.0 16/10/2020
 
 Author: Etienne Muller
-E-mail: biomol.cfb@gmail.com
+E-mail: muller.etienne@hotmail.fr
 Sources: http://github.com/EtieM/outLyzer
 
 
@@ -79,9 +79,9 @@ Program can be downloaded at: http://github.com/EtieM/outLyzer
 REQUIREMENTS
 ------------
 - Linux OS
-- Python v2.7
+- Python v3
 - Python librairies: subprocess / numpy / scipy / argparse / multiprocessing
-- Samtools v1.2 or v1.3
+- Samtools v1.2 to v1.9
 
 
 INSTALLATION
@@ -136,6 +136,9 @@ outLyzer has 2 main operating modes:
 										imbalance in the Forward-Reverse reads distribution in
 										the Forward / Reverse alternative Read Proportion
 										(-bal option)
+				  -force FORCE          Force noise background determination to go below a
+										fixed proportion of the Depth [default = disabled; 0
+										-> 1 ex: "-force 0.2"]
 				  -HSM HSM              HotSpot Metrics: Produce sensitivity Threshold for
 										HotSpot positions, in an additional file. Requires
 										formated HotSpot File in argument (see documentation
@@ -143,24 +146,24 @@ outLyzer has 2 main operating modes:
 				  -verbose VERBOSE      If verbose mode is set to 1, details analysis process
 										steps [0]
 
-				
+
 				Precisions for HSM option:
 				/!\ File required for HotSpot Metrics must be formatted as follows:
-				
+
 				chrN	startPosition	Annotation
-				
+
 				Each column must be separated by a tabulation, and annotation column must be present.
 				ex: chr12	25398284	KRAS_codon12
-				
-				
+
+
 				It will return a tabulated file containing for each position a local estimation of sensitivity, displayed as a percentage.
 
-				
+
 -positionAnalysis mode: $ python outLyzer.py positionAnalysis -bam fileToAnalyse.bam -ref referenceFile.fa -position chr12:123456 [-arguments]
-						
+
 						This mode gives an evaluation of sequencing data and local noise background for one chromosomic position
-						
-						
+
+
 						optional arguments:
 						  -h, --help          show this help message and exit
 						  -samtools SAMTOOLS  Complete Samtools path if not specified in environment
@@ -178,9 +181,13 @@ outLyzer has 2 main operating modes:
 											  Score [7]
 						  -WS WS              Window Size: region (number of bp) around the mutation
 											  on which background noise have to be determined [200]
+						  -force FORCE        Force noise background determination to go below a
+											  fixed proportion of the Depth [default = disabled; 0
+											  -> 1 ex: "-force 0.2"]
 											  
+
 						It directly displays results in standard output as follows:
-						
+
 						['1', '0', '0', '0', '2', '0', '1', '0', '0', '0', '1', '1', '0', '1',
 						'1', '0', '0', '1', '0', '0', '0', '1', '0', '2', '1', '1', '0', '1', 
 						'0', '0', '2', '2', '0', '0', '0', '1', '0', '1', '0', '0', '0', '0', 
@@ -210,10 +217,10 @@ outLyzer has 2 main operating modes:
 						Stretch nearby:            None
 						Motif nearby:              None
 
-						
+
 						The sequence of numbers represents, for each genomic position in the analyzed window,
 						the number of alternative reads.
-						
+
 						Alternative Allele: mutated base. (WT = Wild Type - No mutation on this position)
 						Depth = total number of reads aligned to this position
 						Allele Frequency = proportion of alternative reads
@@ -225,10 +232,11 @@ outLyzer has 2 main operating modes:
 						Raw background = sequencing background noise around the mutation, expressed in number of reads
 						Stretch nearby: indicates if there is a strecth nearby the mutation
 						Motif nearby: indicates if there is a repetitive DNA-sequence motif nearby the mutation
-						
-						
+
+
 -Utilisation test:
 
-$ python outLyzer_v2.0.py -ref reference.fasta -bed test_dataSet.bed -bam  test_dataSet.bam -HSM HotSpot_positions_HSM.bed -AS -FRcor -output outputPath
+$ python outLyzer_v3.0.py -ref reference.fasta -bed test_dataSet.bed -bam  test_dataSet.bam -HSM HotSpot_positions_HSM.bed -AS -FRcor -output outputPath
 
 Results should correspond to resultsExample files
+
