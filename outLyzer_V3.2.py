@@ -968,7 +968,7 @@ OutLyzer is a variant-caller conceived for low allele-ratio mutations detection,
 based on sequencing background noise evaluation.
 It evaluates if the mutation is significantly different from background noise,
 using modified Thompson tau technique.
-Version: 3.1""",formatter_class=RawTextHelpFormatter)
+Version: 3.2""",formatter_class=RawTextHelpFormatter)
         subparsers = parser.add_subparsers(metavar='{calling,positionAnalysis,LICENSE}',help="outLyzer functions")
 # create the parser for the "calling Command" command
         parser_calling = subparsers.add_parser('calling',description='outLyzer calling function, analyze the whole BAM file and displays results in a VCF (Variant Calling Format) File')
