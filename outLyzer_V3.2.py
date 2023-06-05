@@ -15,6 +15,7 @@ from multiprocessing import Process
 from argparse import RawTextHelpFormatter
 from shutil import copyfile
 from collections import defaultdict
+import shlex
 
 
 ### MultiProcessing
@@ -107,8 +108,10 @@ def createOutLyzerCommandList(output,pythonPath,samtoolsPath,progPath,cut,bedLis
 
 
 def launchPileupCommandForBedFile(bamFile,samtoolsPath,referenceFile,bedFile,output):
-    samtoolsOutput = subprocess.check_output('%s mpileup -d 100000 -Q 0 -A -R -B -f %s -x -l %s %s 2>> %ssamtoolsError.txt'%(samtoolsPath,referenceFile,bedFile,bamFile,output),shell=True).decode('utf-8')
-    pileupList = samtoolsOutput.split('\n')
+    samtoolsCmd = '%s mpileup -d 100000 -Q 0 -A -R -B -f %s -x -l %s %s'%(samtoolsPath,referenceFile,bedFile,bamFile)
+    samtoolsResultCmd = subprocess.Popen(shlex.split(samtoolsCmd),stdout=subprocess.PIPE,stderr=subprocess.PIPE, universal_newlines=True)
+    samtoolsResultCmdOut,samtoolsResultCmdErr = samtoolsResultCmd.communicate()
+    pileupList = samtoolsResultCmdOut.splitlines()
     pileupList.pop()
     return pileupList
 
@@ -266,7 +269,7 @@ def mainPileupLineInfosInDic(pileupLine):
     pileupInfosDic = {}
     pileupInfosDic['refBase'] = pileupLine[2]
     pileupInfosDic['depth'] = pileupLine[3]
-    pileupInfosDic['baseCount'] = re.sub(r"(\^.)",r"",pileupLine[4].replace('$',''))
+    pileupInfosDic['baseCount'] = re.sub(r"(\^.)",r"",pileupLine[4].replace('$','').replace('N','.').replace('n',','))
     pileupInfosDic['baseQual'] = pileupLine[5]
     return pileupInfosDic
 
@@ -326,7 +329,7 @@ def defineLeadingMutationType(delReads,insReads,baseCountDic,finalAltBase):
 def countAltReads(baseCount):
     baseCountNoIndel = eraseIndelfromPileup(baseCount)
     indelCount = baseCount.count('-')+baseCount.count('+')
-    altReads = baseCountNoIndel.count('n')+baseCountNoIndel.count('N')+baseCountNoIndel.count('a')+baseCountNoIndel.count('A')+baseCountNoIndel.count('c')+baseCountNoIndel.count('C')+baseCountNoIndel.count('g')+baseCountNoIndel.count('G')+baseCountNoIndel.count('t')+baseCountNoIndel.count('T')
+    altReads = baseCountNoIndel.count('a')+baseCountNoIndel.count('A')+baseCountNoIndel.count('c')+baseCountNoIndel.count('C')+baseCountNoIndel.count('g')+baseCountNoIndel.count('G')+baseCountNoIndel.count('t')+baseCountNoIndel.count('T')
     totalAltReads = indelCount + altReads
     return totalAltReads
 
@@ -388,9 +391,10 @@ def writeVcfHeader(commandLine,vcfFile):
 ##INFO=<ID=SDQ,Number=1,Type=Float,Description="Standard Deviation of average Phred Score">
 ##INFO=<ID=OUTLIER,Number=1,Type=Integer,Description="Background Noise Threshold (Number of Reads)">
 ##FILTER=<ID=noise_background,Description="Mutation's Rate is Higher than Surrounding Background Noise">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
 ##FORMAT=<ID=BAL,Number=2,Type=String,Description="Count of alternative Forward / Reverse Reads">
-##FORMAT=<ID=WTbal,Number=1,Type=String,Description="Forward / Reverse WT reads at the position ">
-##FORMAT=<ID=MSS,Number=1,Type=String,Description="Proximity analysis of Stretch and repetition motifs around mutation ">
+##FORMAT=<ID=WTbal,Number=1,Type=String,Description="Forward / Reverse WT reads at the position">
+##FORMAT=<ID=MSS,Number=1,Type=String,Description="Proximity analysis of Stretch and repetition motifs around mutation">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t%s\n"""%(time.strftime("%Y%m%d"),commandLine,patientID)
     openVcfFile.write(header)
     openVcfFile.close()
@@ -553,10 +557,10 @@ def detectMutations(exonMatrix,studentValue,balance,quality,SDquality,windowSize
                 motifStatus = defineMotifStatus(refSeqToScan,mutPos)
                 if '+' in exonMatrix[rowNum,4] or '-' in exonMatrix[rowNum,4]:
                     ref,alt = transformIndelAnnotation(exonMatrix[rowNum,3], exonMatrix[rowNum,4])
-                    lineToWrite = '%s\t%s\t.\t%s\t%s\t%s\tPASS\tDP=%s;AF=%s;SDQ=%s;OUTLIER=%s\tBAL:WTbal:MSS\t%s:%s:%s\n'%(exonMatrix[rowNum,1],exonMatrix[rowNum,2],ref,alt,exonMatrix[rowNum,9],exonMatrix[rowNum,5],exonMatrix[rowNum,8],exonMatrix[rowNum,10],str(maxOutliers)+forced,exonMatrix[rowNum,11],exonMatrix[rowNum,12],motifStatus)
+                    lineToWrite = '%s\t%s\t.\t%s\t%s\t%s\tPASS\tDP=%s;AF=%s;SDQ=%s;OUTLIER=%s\tGT:BAL:WTbal:MSS\t0/1:%s:%s:%s\n'%(exonMatrix[rowNum,1],exonMatrix[rowNum,2],ref,alt,exonMatrix[rowNum,9],exonMatrix[rowNum,5],exonMatrix[rowNum,8],exonMatrix[rowNum,10],str(maxOutliers)+forced,exonMatrix[rowNum,11],exonMatrix[rowNum,12],motifStatus)
                     fileToWrite.write(lineToWrite)
                 else: 
-                    lineToWrite = '%s\t%s\t.\t%s\t%s\t%s\tPASS\tDP=%s;AF=%s;SDQ=%s;OUTLIER=%s\tBAL:WTbal:MSS\t%s:%s:%s\n'%(exonMatrix[rowNum,1],exonMatrix[rowNum,2],exonMatrix[rowNum,3].upper(),exonMatrix[rowNum,4].upper(),exonMatrix[rowNum,9],exonMatrix[rowNum,5],exonMatrix[rowNum,8],exonMatrix[rowNum,10],str(maxOutliers)+forced,exonMatrix[rowNum,11],exonMatrix[rowNum,12],motifStatus)
+                    lineToWrite = '%s\t%s\t.\t%s\t%s\t%s\tPASS\tDP=%s;AF=%s;SDQ=%s;OUTLIER=%s\tGT:BAL:WTbal:MSS\t0/1:%s:%s:%s\n'%(exonMatrix[rowNum,1],exonMatrix[rowNum,2],exonMatrix[rowNum,3].upper(),exonMatrix[rowNum,4].upper(),exonMatrix[rowNum,9],exonMatrix[rowNum,5],exonMatrix[rowNum,8],exonMatrix[rowNum,10],str(maxOutliers)+forced,exonMatrix[rowNum,11],exonMatrix[rowNum,12],motifStatus)
                     fileToWrite.write(lineToWrite)
     return maxOutliers,exonSensitivityLimit
 
@@ -676,9 +680,11 @@ def readPileupForPosition(pileup,studentValue,balance,quality,SDquality,windowSi
 def detectMutationsAtPosition(exonMatrix,studentValue,balance,quality,SDquality,windowSize,genomicPosition,force):
     altReadList = exonMatrix[:,7].tolist()
     refSeqList = exonMatrix[:,3].tolist()
+    altReadPos = ""
     for rowNum in range(0,len(exonMatrix)):
         positionToFind = '%s:%s'%(exonMatrix[rowNum,1],exonMatrix[rowNum,2])
         if positionToFind == genomicPosition:
+            altReadPos = rowNum
             maxOutliers,forced = calcConfidenceIntervalFromReads(altReadList, studentValue,int(exonMatrix[rowNum,5]),force)
             Chr = exonMatrix[rowNum,1]
             genPos = exonMatrix[rowNum,2]
@@ -729,7 +735,9 @@ def detectMutationsAtPosition(exonMatrix,studentValue,balance,quality,SDquality,
                 else:
                     correctedRper = round(((Alt_R+(Alt_R*diffF))/(Alt_F+Alt_R))*100,1)
                     correctedFper = 100-correctedRper
-            print(altReadList)
+            print("AltReads Before mutation: ",altReadList[:rowNum])
+            print("AltReads Mutation at mutation position: ", altReadList[rowNum])
+            print("AltReads after Mutation",altReadList[rowNum+1:])
             print ("""
 Mutation Position:         %s:%s
 Reference Allele:          %s
@@ -816,7 +824,7 @@ def findTempHSM(tempOutLyzerDir):
             tempoutLyzerResults.append(element)
     return tempoutLyzerResults
     
-def writeFinalResults(bamName,output,ASargs,HSMargs,commandLine):
+def writeFinalResults(bamName,output,ASargs,HSMargs,commandLine,erase):
     tempOutLyzerDir = '%s/outLyzerTemp_%s/'%(args.output,bamName)
     vcfTempList = findTempVcf(tempOutLyzerDir)
     AStempList = findTempAS(tempOutLyzerDir)
@@ -832,7 +840,8 @@ def writeFinalResults(bamName,output,ASargs,HSMargs,commandLine):
         sortASresults(ASoutput, AStempList, tempOutLyzerDir)
     if HSMargs:
         writeHSMresults(HSMoutput, HSMtempList, tempOutLyzerDir)
-    os.system('rm -r %s'%(tempOutLyzerDir))
+    if erase == 0:
+        os.system('rm -r %s'%(tempOutLyzerDir))
  
 def launchCallingFunction(args):
     if checkInputsCalling(args) == True:
@@ -849,7 +858,7 @@ def launchCallingFunction(args):
         manageCommandListToLaunch(outLyzerCommandList, args.core)
         if args.verbose == 1:
             print('Formatting results for %s'%bamName)
-        writeFinalResults(bamName, args.output, args.AS,args.HSM,commandLine)
+        writeFinalResults(bamName, args.output, args.AS,args.HSM,commandLine,args.NoEraseTemp)
         endScript = time.time()
         print('outLyzer analysis performed in %f sec.'%(endScript-startScript))
     
@@ -958,7 +967,8 @@ if __name__ == "__main__":
 OutLyzer is a variant-caller conceived for low allele-ratio mutations detection, 
 based on sequencing background noise evaluation.
 It evaluates if the mutation is significantly different from background noise,
-using modified Thompson tau technique.""",formatter_class=RawTextHelpFormatter)
+using modified Thompson tau technique.
+Version: 3.1""",formatter_class=RawTextHelpFormatter)
         subparsers = parser.add_subparsers(metavar='{calling,positionAnalysis,LICENSE}',help="outLyzer functions")
 # create the parser for the "calling Command" command
         parser_calling = subparsers.add_parser('calling',description='outLyzer calling function, analyze the whole BAM file and displays results in a VCF (Variant Calling Format) File')
@@ -980,6 +990,7 @@ using modified Thompson tau technique.""",formatter_class=RawTextHelpFormatter)
         parser_calling.add_argument('-AS',help='Analysis sensitivity: Returns an additional file containing analysis average sensitivity for each line of bed file',action='store_true')
         parser_calling.add_argument('-FRcor',help='Forward Reverse Correction: take into account any imbalance in the Forward-Reverse reads distribution in the Forward / Reverse alternative Read Proportion (-bal option)',action='store_true')
         parser_calling.add_argument('-force',help='Force noise background determination to go below a fixed proportion of the Depth [default = disabled; 0 -> 1 ex: "-force 0.2"] ',type = float, default=0)
+        parser_calling.add_argument('-NoEraseTemp',help='Do not erase temporary files [default = disabled; enabled = 1 ',type = float, default=0)
         parser_calling.add_argument('-HSM',help='HotSpot Metrics: Produce sensitivity Threshold for HotSpot positions, in an additional file. Requires formated HotSpot File in argument (see documentation for more details).')
         parser_calling.add_argument('-verbose',help='If verbose mode is set to 1, details analysis process steps [0]',type = int, default=0)
         parser_calling.set_defaults(func=launchCallingFunction)
@@ -1001,6 +1012,7 @@ using modified Thompson tau technique.""",formatter_class=RawTextHelpFormatter)
         parser_subprocess.add_argument('-AS',help='Analysis sensitivity: Returns an additional file containing analysis average sensitivity for each line of bed file',action='store_true')
         parser_subprocess.add_argument('-FRcor',help='Forward Reverse Correction: take into account any imbalance in the Forward-Reverse reads distribution in the Forward / Reverse alternative Read Proportion (-bal option)',action='store_true')
         parser_subprocess.add_argument('-force',help='Force noise background determination to go below a fixed proportion of the Depth [default = disabled ; 0 -> 1 ex: "-force 0.2"] ',type = float,default =0)
+        parser_subprocess.add_argument('-NoEraseTemp',help='Do not erase temporary files [default = disabled; enabled = 1 ',type = float, default=0)
         parser_subprocess.add_argument('-HSM',help='HotSpot Metrics: Produce sensitivity Threshold for HotSpot positions, in an additional file. Requires HotSpot File in argument')
         parser_subprocess.add_argument('-output',help='output Path To write results',required=True)
         parser_subprocess.add_argument('-verbose',help='If verbose mode is set to 1, details analysis process steps [0]',type = int, default=0)
